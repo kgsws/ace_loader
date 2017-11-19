@@ -1,0 +1,504 @@
+#include <libtransistor/nx.h>
+#include <libtransistor/ipc.h>
+#include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include "defs.h"
+#include "http.h"
+
+#define WK_SIZE		0x5e3000
+#define WK_MEM_SIZE	0x11f000
+
+#define HEAP_MAP_SIZE	32
+
+FILE custom_stdout;
+static int sck;
+
+// thread context
+typedef struct
+{
+	void *ptr_1c8;
+	uint64_t unk0;
+	void *ptr_10_a;
+	void *ptr_10_b;
+	uint8_t empty[0x20];
+	uint32_t status;
+	uint32_t priority;
+	void *sp_base;
+	void *sp_mirror;
+	uint64_t sp_size;
+	uint8_t unk1[0x128];
+	char name[32];
+	void *name_ptr;
+	uint64_t unk2;
+	uint32_t handle;
+	uint32_t zero;
+	void *mutex;
+	uint64_t unk3;
+} thread_context_t;
+
+// used to keep track of mapped heap
+// for future unmapping
+typedef struct
+{
+	void *src; // HEAP
+	void *dst; // map
+	uint64_t size;
+} heap_map_t;
+
+static const struct sockaddr_in server_addr =
+{
+	.sin_family = AF_INET,
+	.sin_port = htons(2991),
+	.sin_addr = {
+		.s_addr = make_ip(192,168,1,47)
+	}
+};
+
+uint64_t extra_cleanup(uint64_t arg0);
+
+void *wkBase;
+
+// these handles seems to be always present
+const int static_handles[] =
+{
+	0x010001,
+	0x020003,
+	0x028002,
+	0x030004,
+	0x038005,
+	0x040006,
+	0x048007,
+	0x058009,
+	0x06000A,
+	0x06800B,
+	0x07000C,
+	0x08000E,
+	0x08800D,
+	0x09000F,
+	0x098010,
+	0x0A0011,
+	0x0A8012,
+	0x0B0013,
+	0x0B8014,
+	0x0C0015,
+	0x100017,
+	0x1E0016,
+	0x1E8018,
+	0x1F0019,
+	0x1F801A,
+	0x20001B,
+	0x21001D,
+	0x21801E,
+	0x248021,
+	0x25001F,
+	0x290023,
+	0x298022,
+	0x2A0024,
+	0x2A8025,
+	0x2B0026,
+	0x2C0028,
+	0x2D802A,
+	0x2E002B,
+	0x2E802C,
+	0x2F002D,
+	0x2F802E,
+	0x30802F,
+	0x328032,
+	0x330033,
+	0x338034,
+	0x348036
+};
+
+// map area
+void *map_base;
+heap_map_t heap_map[HEAP_MAP_SIZE];
+int heap_map_cur;
+
+void *test_base;
+
+// dummy for linker fail
+void *__trunctfdf2()
+{
+	return NULL;
+}
+// dummy for linker fail
+long double __extenddftf2(double a)
+{
+	return a;
+}
+
+static int stdout_debug(struct _reent *reent, void *v, const char *ptr, int len)
+{
+	bsd_send(sck, ptr, len, 0);
+	return len;
+}
+
+void mem_info()
+{
+	void *addr = NULL;
+	memory_info_t minfo;
+	uint32_t pinfo;
+
+	while(1)
+	{
+		if(svcQueryMemory(&minfo, &pinfo, addr))
+		{
+			printf("- querry fail\n");
+			return;
+		}
+
+		printf("mem 0x%016lX size 0x%016lX; %i %i [%i]\n", (uint64_t)minfo.base_addr, minfo.size, minfo.permission, minfo.memory_type, minfo.memory_attribute);
+
+		addr = minfo.base_addr + minfo.size;
+		if(!addr)
+			break;
+	}
+}
+
+int make_mem_block()
+{
+	void *addr = NULL;
+	memory_info_t minfo;
+	uint32_t pinfo;
+	void *map = map_base;
+
+	heap_map_cur = 0;
+
+	while(1)
+	{
+		if(svcQueryMemory(&minfo, &pinfo, addr))
+			return 1;
+
+		if(minfo.permission == 3 && minfo.memory_type == 5 && minfo.memory_attribute == 0)
+		{
+			int ret = svcMapMemory(map, minfo.base_addr, minfo.size);
+			if(!ret)
+			{
+				heap_map[heap_map_cur].src = minfo.base_addr;
+				heap_map[heap_map_cur].dst = map;
+				heap_map[heap_map_cur].size = minfo.size;
+				map += minfo.size;
+				if(heap_map_cur == HEAP_MAP_SIZE)
+				{
+					printf("- out of map storage space\n");
+					break;
+				}
+			} else
+				printf("- svcMapMemory failed 0x%06X\n", ret);
+		}
+
+		addr = minfo.base_addr + minfo.size;
+		if(!addr)
+			break;
+	}
+
+	printf("- mapped %luB contiguous memory block\n", map - map_base);
+
+	return 0;
+}
+
+int heap_cleanup()
+{
+	void *addr = NULL;
+	memory_info_t minfo;
+	uint32_t pinfo;
+
+	while(1)
+	{
+		if(svcQueryMemory(&minfo, &pinfo, addr))
+			return 1;
+
+		if(minfo.permission == 3 && minfo.memory_type == 5 && minfo.memory_attribute & 8)
+			printf("- svcSetMemoryAttribute 0x%06X\n", svcSetMemoryAttribute(minfo.base_addr, minfo.size, 0, 0));
+
+		addr = minfo.base_addr + minfo.size;
+		if(!addr)
+			break;
+	}
+
+	return 0;
+}
+
+void locate_threads(void *base, uint64_t size, int simple)
+{
+	memory_info_t minfo;
+	uint32_t pinfo;
+	thread_context_t *tc;
+
+	while(size)
+	{
+		tc = (thread_context_t*)*(uint64_t*)(base + 0x1f8);
+		if(!svcQueryMemory(&minfo, &pinfo, tc) && minfo.permission == 3)
+		{
+			if(!svcGetThreadPriority(&pinfo, tc->handle))
+			{
+				printf("- found thread context 0x%016lX at 0x%016lX\n handle: 0x%08X\n SP base: 0x%016lX\n SP mirror: 0x%016lX\n SP size: 0x%016lX\n ptrs 0x%016lX 0x%016lX 0x%016lX\n name: '%.32s'\n", (uint64_t)tc, (uint64_t)base, tc->handle, (uint64_t)tc->sp_base, (uint64_t)tc->sp_mirror, tc->sp_size, (uint64_t)tc->ptr_1c8, (uint64_t)tc->ptr_10_a, (uint64_t)tc->ptr_10_b, tc->name);
+				if(strcmp(tc->name, "MainThread"))
+				{
+					uint64_t *ptr = tc->sp_mirror;
+					uint64_t size = tc->sp_size;
+					uint64_t *bend = wkBase + WK_SIZE;
+					switch(simple)
+					{
+						case 1:
+							printf("- cancel sync: 0x%06X\n", svcCancelSynchronization(tc->handle));
+//							printf("- reset signal: 0x%06X\n", svcResetSignal(tc->handle));
+							printf("- close handle: 0x%06X\n", svcCloseHandle(tc->handle));
+							printf("- unmap stack: 0x%06X\n", svcUnmapMemory(tc->sp_mirror, tc->sp_base, tc->sp_size));
+						break;
+						case 0:
+							// broken getInfo workaround
+							if(tc->sp_mirror != tc->sp_base)
+							{
+								// use lowest detected mirror address
+								if((uint64_t)tc->sp_mirror < (uint64_t)map_base)
+									map_base = tc->sp_mirror;
+							}
+							// exit thread
+							printf("- cleaning up\n");
+							while(size)
+							{
+								if(*ptr >= (uint64_t)wkBase && *ptr < (uint64_t)bend)
+									*ptr = (uint64_t)(wkBase + 0x3ed2d4);
+								ptr++;
+								size -= sizeof(uint64_t);
+							}
+						break;
+					}
+				}
+			} else
+				printf("- found dead thread '%.32s'\n", tc->name);
+		} else
+			printf("- no thread context at 0x%016lX\n", (uint64_t)tc);
+		base += 0x200;
+		size -= 0x200;
+	}
+}
+
+int thread_scan(int simple)
+{
+	void *addr = NULL;
+	memory_info_t minfo;
+	uint32_t pinfo;
+
+	printf("searching for threads ...\n");
+
+	while(1)
+	{
+		if(svcQueryMemory(&minfo, &pinfo, addr))
+			return 1;
+
+		if(minfo.permission == 3 && minfo.memory_type == 12)
+		{
+			printf("- found TLS block\n");
+			locate_threads(minfo.base_addr, minfo.size, simple);
+		}
+
+		addr = minfo.base_addr + minfo.size;
+		if(!addr)
+			break;
+	}
+	return 0;
+}
+
+uint64_t wk_call(uint64_t arg0, uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t offs0, uint64_t offs1)
+{
+	uint64_t ret;
+	uint64_t (*func)(uint64_t, uint64_t, uint64_t, uint64_t) = wkBase + offs0 + (offs1 << 16);
+
+	printf("* calling 0x%lX\n", offs0 + (offs1 << 16));
+	ret = func(arg0, arg1, arg2, arg3);
+	printf("* returned\n");
+
+	return ret;
+}
+
+void close_handles()
+{
+	int i;
+
+	for(i = 0; i < sizeof(static_handles) / sizeof(int); i++)
+	{
+		int ret0, ret1, ret2;
+		int handle = static_handles[i];
+		ret2 = svcClearEvent(handle);
+		ret1 = svcResetSignal(handle);
+		ret0 = svcCloseHandle(handle);
+		printf("- clear, reset, close handle 0x%06X: 0x%06X, 0x%06X, 0x%06X\n", handle, ret2, ret1, ret0);
+	}
+}
+
+void hook_func(uint64_t arg0)
+{
+	uint64_t (*funcA)(uint64_t);
+	void *ptr;
+	int ret;
+
+	printf("** EXIT HOOK **\n");
+
+	// do some webkit cleanup
+
+	funcA = wkBase + 0x1D01C;
+	arg0 = funcA(arg0);
+	printf("- returned from 0x1D01C\n");
+
+	funcA = wkBase + 0x2080c;
+	arg0 = funcA(arg0 + 0x10);
+	printf("- returned from 0x2080c\n");
+
+	arg0 = extra_cleanup(arg0);
+	printf("* extra return 0x%016lX\n", arg0);
+
+	// get map range - returns invalid range
+	ret = svcGetInfo((uint64_t*)&map_base, 2, 0xffff8001, 0);
+	if(!ret)
+	{
+		printf("- map base address 0x%016lX\n", (uint64_t)map_base);
+	} else
+		printf("- get info error 0x%06X\n", ret);
+
+	ret = svcGetInfo((uint64_t*)&ptr, 3, 0xffff8001, 0);
+	if(!ret)
+	{
+		printf("- map base size 0x%016lX\n", (uint64_t)ptr);
+	} else
+		printf("- get info error 0x%06X\n", ret);
+
+	// broken getInfo workaround
+	// lowest stack mirror found is used as actual base
+	map_base = (void*)0xffffffffffffffff; 
+
+	// kill all threads
+	thread_scan(0);
+	svcSleepThread(1000*1000*1000);
+	thread_scan(1);
+	svcSleepThread(1000*1000*1000);
+
+	// close some handles
+	printf("- closing handles\n");
+	close_handles();
+	svcSleepThread(100*1000*1000);
+
+	// get entire heap
+	ret = svcSetHeapSize(&ptr, 0x18000000);
+	printf("- set heap size 0x%06X at 0x%016lX\n", ret, (uint64_t)ptr);
+
+	// cleanup the heap
+	heap_cleanup();
+
+	// get NRO
+	http_get_nro("test.nro", NULL, 0);
+	printf("- closing\n");
+
+	// test memory block generator
+//	make_mem_block();
+
+	// debug
+//	mem_info();
+
+	bsd_close(sck);
+	bsd_finalize();
+	sm_finalize();
+
+	svcSleepThread(5000*1000*1000);
+	*(uint64_t*)8 = 1;
+
+	while(1);
+}
+
+int main(const char *http_host)
+{
+	void *addr = NULL;
+	memory_info_t minfo;
+	uint32_t pinfo;
+	uint64_t *ptr;
+
+	ipc_debug_flag = 0;
+
+	if(sm_init() != RESULT_OK)
+		return 1;
+
+	if(bsd_init() != RESULT_OK)
+	{
+		sm_finalize();
+		return 1;
+	}
+
+	sck = bsd_socket(2, 1, 6); // AF_INET, SOCK_STREAM, PROTO_TCP
+	if(sck < 0)
+	{
+		bsd_finalize();
+		sm_finalize();
+		return 1;
+	}
+
+	if(bsd_connect(sck, (struct sockaddr*) &server_addr, sizeof(server_addr)) < 0)
+	{
+		bsd_close(sck);
+		bsd_finalize();
+		sm_finalize();
+		return 1;
+	}
+
+	// this exact sequence will redirect stdout to socket
+	printf("_"); // init stdout
+	custom_stdout._write = stdout_debug;
+	custom_stdout._flags = __SWR | __SNBF;
+	custom_stdout._bf._base = (void*)1;
+	stdout = &custom_stdout;
+	stderr = &custom_stdout;
+
+	// init HTTP
+	if(http_init())
+	{
+		printf("- failed to get HTTP address\n");
+		bsd_close(sck);
+		bsd_finalize();
+		sm_finalize();
+		return 1;
+	}
+
+	// locate and hook webkit
+	printf("searching for webkit ...\n");
+	while(1)
+	{
+		if(svcQueryMemory(&minfo, &pinfo, addr))
+		{
+			printf("- querry fail\n");
+			bsd_close(sck);
+			bsd_finalize();
+			sm_finalize();
+			return 1;
+		}
+
+		if(minfo.size == WK_SIZE && minfo.permission == 5 && minfo.memory_type == 3)
+		{
+			printf("- found webkit\n");
+			wkBase = minfo.base_addr;
+		}
+		if(minfo.size == WK_MEM_SIZE && minfo.permission == 3 && minfo.memory_type == 4)
+		{
+			ptr = minfo.base_addr + 0x62E0;
+			printf("- found webkit mem\n");
+			*ptr = (uint64_t)hook_func; // original call 0x16e6b4 from 0x12b524
+		}
+		addr = minfo.base_addr + minfo.size;
+		if(!addr)
+			break;
+	}
+
+	if(!ptr || !wkBase)
+	{
+		printf("- failed to locate webkit memories\n");
+		bsd_close(sck);
+		bsd_finalize();
+		sm_finalize();
+		return 1;
+	}
+
+	printf("- ready to exit\n");
+
+	return 0;
+}
+
