@@ -5,12 +5,13 @@
 #include <stdio.h>
 #include "defs.h"
 #include "http.h"
+#include "memory.h"
 
 static FILE http_stdout;
 static int sck; // HTTP socket
 
 static const char http_get_template[] = "GET /files/%s HTTP/1.1\r\nHost: %s\r\nUser-Agent: ACE loader\r\nAccept-Encoding: none\r\nConnection: close\r\n\r\n";
-static char http_host[] = HTTP_HOSTNAME;
+static char http_host[128];
 
 static struct sockaddr_in server_addr =
 {
@@ -37,10 +38,7 @@ static int parse_header(char *buf, int len, int *offset, int *got)
 		// get some bytes
 		ret = bsd_recv(sck, ptr, len, 0);
 		if(ret <= 0)
-		{
-			printf("- bsd_recv %i\n", ret);
 			return -1;
-		}
 		ptr += ret;
 		// parse line(s)
 		while(1)
@@ -57,8 +55,8 @@ static int parse_header(char *buf, int len, int *offset, int *got)
 						// empty line, header ending
 						if(state)
 						{
-							*offset = (tptr + 1) - buf;
-							*got = (ptr - buf) - *offset;
+							*offset = (int)((tptr + 1) - buf);
+							*got = (int)((ptr - buf) - *offset);
 							return content_length;
 						} else
 							return -2;
@@ -95,35 +93,33 @@ static int parse_header(char *buf, int len, int *offset, int *got)
 	return -1;
 }
 
-int http_init()
+int http_init(const char *hostname)
 {
-//	int ret;
-//	struct addrinfo *ai = NULL;
-//	struct addrinfo hints;
-//	struct sockaddr_in *sin;
+	int ret;
+	struct addrinfo_fixed aif;
+	struct sockaddr_in *sin;
+	struct addrinfo hints =
+	{
+		.ai_family = AF_INET,
+		.ai_socktype = SOCK_STREAM
+	};
 
-//	hints.ai_family = AF_INET;
-//	hints.ai_socktype = SOCK_STREAM;
-
-	// get IP - fails in bsd.c
-/*	ret = bsd_getaddrinfo(HTTP_HOSTNAME, "6767", &hints, &ai);
+	// get IP
+	ret = bsd_getaddrinfo_fixed(hostname, "6767", &hints, &aif, 1);
 	if(ret)
 	{
 		printf("- failed to getaddrinfo: %d, 0x%x\n", ret, bsd_result);
 		return ret;
 	}
-	if(!ai)
-		return 1;
-	if(ai->ai_family != AF_INET)
+	if(aif.ai.ai_family != AF_INET)
 		return 2;
-	sin = (struct sockaddr_in*)ai->ai_addr;
+	sin = (struct sockaddr_in*)&aif.addr;
 	server_addr.sin_addr.s_addr = sin->sin_addr.s_addr;
-	bsd_freeaddrinfo(ai);
 
-	printf("- host IP is %i.%i.%i.%i\n", server_addr.sin_addr.s_addr & 0xFF, (server_addr.sin_addr.s_addr >> 8) & 0xFF, (server_addr.sin_addr.s_addr >> 16) & 0xFF, server_addr.sin_addr.s_addr >> 24);
-*/
-	// for now, use hardcoded IP
-	server_addr.sin_addr.s_addr = make_ip(192,168,1,47);
+	printf("- host '%s' IP is %i.%i.%i.%i\n", hostname, server_addr.sin_addr.s_addr & 0xFF, (server_addr.sin_addr.s_addr >> 8) & 0xFF, (server_addr.sin_addr.s_addr >> 16) & 0xFF, server_addr.sin_addr.s_addr >> 24);
+
+	// copy hostname
+	strncpy(http_host, hostname, sizeof(http_host)-1);
 
 	// prepare HTTP stdout
 	http_stdout._write = stdout_http;
@@ -133,20 +129,21 @@ int http_init()
 	return 0;
 }
 
-int http_get_nro(const char *path, void *buf, int size)
+int http_get_file(const char *path)
 {
 	char temp[1024];
-	int ret;
-	int offs, got;
+	int ret, offs, got;
+	void *ptr;
+	int size;
 
 	sck = bsd_socket(2, 1, 6); // AF_INET, SOCK_STREAM, PROTO_TCP
 	if(sck < 0)
-		return 1;
+		return -1;
 
 	if(bsd_connect(sck, (struct sockaddr*) &server_addr, sizeof(server_addr)) < 0)
 	{
 		bsd_close(sck);
-		return 2;
+		return -2;
 	}
 
 	// make a request
@@ -155,25 +152,39 @@ int http_get_nro(const char *path, void *buf, int size)
 	// get an answer
 	ret = parse_header(temp, sizeof(temp), &offs, &got);
 	// TEST
-	printf("- file size: %iB (offs %iB, got %iB)\n", ret, offs, got);
+	printf("- HTTP file size: %iB\n", ret);
 	if(ret > 0)
 	{
+		if(ret > heap_size)
+		{
+			bsd_close(sck);
+			printf("- file is too big\n");
+			return -3;
+		}
+		ptr = heap_base;
+		size = ret;
 		if(got)
 		{
-			if(ret + offs < sizeof(temp))
-				temp[ret + offs] = 0;
-			else
-				temp[sizeof(temp)-1] = 0;
-			printf("- contents:\n%s\n", (const char*)(temp + offs));
-		} else
-		{
-			got = bsd_recv(sck, temp, sizeof(temp)-1, 0);
-			temp[got] = 0;
-			printf("- got contents:\n%s\n", (const char*)temp);
+			memcpy(ptr, temp + offs, got);
+			ptr += got;
+			size -= got;
 		}
+		while(size)
+		{
+			got = bsd_recv(sck, ptr, size, 0);
+			if(got <= 0)
+			{
+				bsd_close(sck);
+				printf("- read error\n");
+				return -4;
+			}
+			size -= got;
+			ptr += got;
+		}
+		printf("- file loaded\n");
 	}
 
 	bsd_close(sck);
-	return 0;
+	return ret;
 }
 

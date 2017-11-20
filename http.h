@@ -1,3 +1,3 @@
 
-int http_init();
-int http_get_nro(const char *path, void *buf, int size);
+int http_init(const char *hostname);
+int http_get_file(const char *path);

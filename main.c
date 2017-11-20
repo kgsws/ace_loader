@@ -7,6 +7,7 @@
 #include "memory.h"
 #include "http.h"
 #include "server.h"
+#include "nro.h"
 
 FILE custom_stdout;
 static int sck;
@@ -287,13 +288,21 @@ void hook_func(uint64_t arg0)
 	if(mem_get_heap())
 		goto crash;
 
+	// debug
+	printf("- got %luB for NRO\n", heap_size);
+
 	// get NRO
-//	http_get_nro("test.nro", NULL, 0);
-//	printf("- closing\n");
+	ret = http_get_file("autorun.nro");
+	if(ret > 0)
+	{
+		printf("- ldr:ro test\n");
+		nro_load(ret);
+	}
 
 	// debug
 //	mem_info();
 
+	// start 'push' server
 	if(!server_init())
 		server_loop();
 
@@ -346,7 +355,7 @@ int main(const char *http_host)
 	stderr = &custom_stdout;
 
 	// init HTTP
-	if(http_init())
+	if(http_init(http_host))
 	{
 		printf("- failed to get HTTP address\n");
 		bsd_close(sck);

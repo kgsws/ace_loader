@@ -7,7 +7,7 @@
 #include "server.h"
 #include "memory.h"
 
-static handle_t sockets[2];
+static int sockets[2];
 
 int server_init()
 {
@@ -44,8 +44,8 @@ void server_loop()
 	struct sockaddr_in client_addr;
 	int ret;
 	uint32_t idx;
-	void *ptr;
-	uint64_t size;
+	void *ptr = NULL;
+	uint64_t size = 0;
 
 	printf("- starting push server ...\n");
 	while(1)
