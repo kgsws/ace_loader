@@ -9,7 +9,7 @@ AS_FLAGS := -arch=aarch64 -triple aarch64-none-switch
 PYTHON2 := python2
 MEPHISTO := ~/programy/Mephisto/ctu
 # all compiled files
-OBJ := main.o memory.o asm.o http.o
+OBJ := main.o memory.o asm.o http.o server.o
 
 .SUFFIXES: # disable built-in rules
 
