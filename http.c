@@ -15,7 +15,7 @@ static char http_host[] = HTTP_HOSTNAME;
 static struct sockaddr_in server_addr =
 {
 	.sin_family = AF_INET,
-	.sin_port = htons(80),
+	.sin_port = htons(80)
 };
 
 static int stdout_http(struct _reent *reent, void *v, const char *ptr, int len)
@@ -150,9 +150,7 @@ int http_get_nro(const char *path, void *buf, int size)
 	}
 
 	// make a request
-	stdout = &http_stdout;
-	printf(http_get_template, path, http_host);
-	stdout = &custom_stdout;
+	fprintf(&http_stdout, http_get_template, path, http_host);
 
 	// get an answer
 	ret = parse_header(temp, sizeof(temp), &offs, &got);
@@ -162,8 +160,8 @@ int http_get_nro(const char *path, void *buf, int size)
 	{
 		if(got)
 		{
-			if(size + offs < sizeof(temp))
-				temp[size + offs] = 0;
+			if(ret + offs < sizeof(temp))
+				temp[ret + offs] = 0;
 			else
 				temp[sizeof(temp)-1] = 0;
 			printf("- contents:\n%s\n", (const char*)(temp + offs));

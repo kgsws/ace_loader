@@ -6,6 +6,7 @@
 #include "defs.h"
 #include "memory.h"
 #include "http.h"
+#include "server.h"
 
 FILE custom_stdout;
 static int sck;
@@ -235,14 +236,14 @@ void hook_func(uint64_t arg0)
 
 	funcA = wkBase + 0x1D01C;
 	arg0 = funcA(arg0);
-	printf("- returned from 0x1D01C\n");
+//	printf("- returned from 0x1D01C\n");
 
 	funcA = wkBase + 0x2080c;
 	arg0 = funcA(arg0 + 0x10);
-	printf("- returned from 0x2080c\n");
+//	printf("- returned from 0x2080c\n");
 
 	arg0 = extra_cleanup(arg0);
-	printf("* extra return 0x%016lX\n", arg0);
+//	printf("* extra return 0x%016lX\n", arg0);
 
 	// get map range - returns invalid range
 	ret = svcGetInfo((uint64_t*)&map_base, 2, 0xffff8001, 0);
@@ -274,26 +275,35 @@ void hook_func(uint64_t arg0)
 	close_handles();
 	svcSleepThread(100*1000*1000);
 
-	// get entire heap
+	// use entire heap
 	ret = svcSetHeapSize(&ptr, 0x18000000);
 	printf("- set heap size 0x%06X at 0x%016lX\n", ret, (uint64_t)ptr);
 
 	// cleanup the heap
-	mem_heap_cleanup();
+	if(mem_heap_cleanup())
+		goto crash;
+
+	// get largest heap block
+	if(mem_get_heap())
+		goto crash;
 
 	// get NRO
-	http_get_nro("test.nro", NULL, 0);
-	printf("- closing\n");
+//	http_get_nro("test.nro", NULL, 0);
+//	printf("- closing\n");
 
 	// debug
 //	mem_info();
 
+	if(!server_init())
+		server_loop();
+
+crash:
 	bsd_close(sck);
 	bsd_finalize();
 	sm_finalize();
 
-	svcSleepThread(5000*1000*1000);
-	*(uint64_t*)8 = 1;
+	svcSleepThread(1000*1000*1000);
+	*(uint64_t*)8 = 1; // CRASH
 
 	while(1);
 }
