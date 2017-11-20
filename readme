@@ -6,3 +6,5 @@
 
 path to this should be something like 'libtransistor/projects/ace_loader'
 
+SHA256 implementation used from:
+https://github.com/B-Con/crypto-algorithms

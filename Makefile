@@ -1,6 +1,6 @@
 LIBTRANSISTOR_HOME=../../
 PROGRAM := ace
-OBJ := main.o memory.o asm.o http.o server.o
+OBJ := main.o memory.o asm.o nro.o sha256.o http.o server.o
 
 include $(LIBTRANSISTOR_HOME)/libtransistor.mk
 
