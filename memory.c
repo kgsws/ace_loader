@@ -13,6 +13,10 @@ void *map_base;
 static heap_map_t heap_map[HEAP_MAP_SIZE];
 static int heap_map_cur;
 
+// heap area
+void *heap_base;
+uint64_t heap_size;
+
 // dump address space mapping
 void mem_info()
 {
@@ -103,6 +107,41 @@ int mem_heap_cleanup()
 	return 0;
 }
 
+// get biggest HEAP block
+int mem_get_heap()
+{
+	void *addr = NULL;
+	memory_info_t minfo;
+	uint32_t pinfo;
+	void *ptr;
+	uint64_t size = 0;
+
+	while(1)
+	{
+		if(svcQueryMemory(&minfo, &pinfo, addr))
+			return 1;
+
+		if(minfo.permission == 3 && minfo.memory_type == 5 && minfo.size > size)
+		{
+			size = minfo.size;
+			ptr = minfo.base_addr;
+		}
+
+		addr = minfo.base_addr + minfo.size;
+		if(!addr)
+			break;
+	}
+
+	if(!size)
+		return 1;
+
+	heap_base = ptr;
+	heap_size = size;
+
+	return 0;
+}
+
+// install exit hook in webkit
 int mem_install_hook(void *hook_func)
 {
 	void *addr = NULL;
