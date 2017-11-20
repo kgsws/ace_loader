@@ -4,12 +4,8 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include "defs.h"
+#include "memory.h"
 #include "http.h"
-
-#define WK_SIZE		0x5e3000
-#define WK_MEM_SIZE	0x11f000
-
-#define HEAP_MAP_SIZE	32
 
 FILE custom_stdout;
 static int sck;
@@ -37,15 +33,6 @@ typedef struct
 	uint64_t unk3;
 } thread_context_t;
 
-// used to keep track of mapped heap
-// for future unmapping
-typedef struct
-{
-	void *src; // HEAP
-	void *dst; // map
-	uint64_t size;
-} heap_map_t;
-
 static const struct sockaddr_in server_addr =
 {
 	.sin_family = AF_INET,
@@ -56,8 +43,6 @@ static const struct sockaddr_in server_addr =
 };
 
 uint64_t extra_cleanup(uint64_t arg0);
-
-void *wkBase;
 
 // these handles seems to be always present
 const int static_handles[] =
@@ -110,11 +95,6 @@ const int static_handles[] =
 	0x348036
 };
 
-// map area
-void *map_base;
-heap_map_t heap_map[HEAP_MAP_SIZE];
-int heap_map_cur;
-
 void *test_base;
 
 // dummy for linker fail
@@ -132,92 +112,6 @@ static int stdout_debug(struct _reent *reent, void *v, const char *ptr, int len)
 {
 	bsd_send(sck, ptr, len, 0);
 	return len;
-}
-
-void mem_info()
-{
-	void *addr = NULL;
-	memory_info_t minfo;
-	uint32_t pinfo;
-
-	while(1)
-	{
-		if(svcQueryMemory(&minfo, &pinfo, addr))
-		{
-			printf("- querry fail\n");
-			return;
-		}
-
-		printf("mem 0x%016lX size 0x%016lX; %i %i [%i]\n", (uint64_t)minfo.base_addr, minfo.size, minfo.permission, minfo.memory_type, minfo.memory_attribute);
-
-		addr = minfo.base_addr + minfo.size;
-		if(!addr)
-			break;
-	}
-}
-
-int make_mem_block()
-{
-	void *addr = NULL;
-	memory_info_t minfo;
-	uint32_t pinfo;
-	void *map = map_base;
-
-	heap_map_cur = 0;
-
-	while(1)
-	{
-		if(svcQueryMemory(&minfo, &pinfo, addr))
-			return 1;
-
-		if(minfo.permission == 3 && minfo.memory_type == 5 && minfo.memory_attribute == 0)
-		{
-			int ret = svcMapMemory(map, minfo.base_addr, minfo.size);
-			if(!ret)
-			{
-				heap_map[heap_map_cur].src = minfo.base_addr;
-				heap_map[heap_map_cur].dst = map;
-				heap_map[heap_map_cur].size = minfo.size;
-				map += minfo.size;
-				if(heap_map_cur == HEAP_MAP_SIZE)
-				{
-					printf("- out of map storage space\n");
-					break;
-				}
-			} else
-				printf("- svcMapMemory failed 0x%06X\n", ret);
-		}
-
-		addr = minfo.base_addr + minfo.size;
-		if(!addr)
-			break;
-	}
-
-	printf("- mapped %luB contiguous memory block\n", map - map_base);
-
-	return 0;
-}
-
-int heap_cleanup()
-{
-	void *addr = NULL;
-	memory_info_t minfo;
-	uint32_t pinfo;
-
-	while(1)
-	{
-		if(svcQueryMemory(&minfo, &pinfo, addr))
-			return 1;
-
-		if(minfo.permission == 3 && minfo.memory_type == 5 && minfo.memory_attribute & 8)
-			printf("- svcSetMemoryAttribute 0x%06X\n", svcSetMemoryAttribute(minfo.base_addr, minfo.size, 0, 0));
-
-		addr = minfo.base_addr + minfo.size;
-		if(!addr)
-			break;
-	}
-
-	return 0;
 }
 
 void locate_threads(void *base, uint64_t size, int simple)
@@ -385,14 +279,11 @@ void hook_func(uint64_t arg0)
 	printf("- set heap size 0x%06X at 0x%016lX\n", ret, (uint64_t)ptr);
 
 	// cleanup the heap
-	heap_cleanup();
+	mem_heap_cleanup();
 
 	// get NRO
 	http_get_nro("test.nro", NULL, 0);
 	printf("- closing\n");
-
-	// test memory block generator
-//	make_mem_block();
 
 	// debug
 //	mem_info();
@@ -409,11 +300,6 @@ void hook_func(uint64_t arg0)
 
 int main(const char *http_host)
 {
-	void *addr = NULL;
-	memory_info_t minfo;
-	uint32_t pinfo;
-	uint64_t *ptr;
-
 	ipc_debug_flag = 0;
 
 	if(sm_init() != RESULT_OK)
@@ -461,34 +347,7 @@ int main(const char *http_host)
 
 	// locate and hook webkit
 	printf("searching for webkit ...\n");
-	while(1)
-	{
-		if(svcQueryMemory(&minfo, &pinfo, addr))
-		{
-			printf("- querry fail\n");
-			bsd_close(sck);
-			bsd_finalize();
-			sm_finalize();
-			return 1;
-		}
-
-		if(minfo.size == WK_SIZE && minfo.permission == 5 && minfo.memory_type == 3)
-		{
-			printf("- found webkit\n");
-			wkBase = minfo.base_addr;
-		}
-		if(minfo.size == WK_MEM_SIZE && minfo.permission == 3 && minfo.memory_type == 4)
-		{
-			ptr = minfo.base_addr + 0x62E0;
-			printf("- found webkit mem\n");
-			*ptr = (uint64_t)hook_func; // original call 0x16e6b4 from 0x12b524
-		}
-		addr = minfo.base_addr + minfo.size;
-		if(!addr)
-			break;
-	}
-
-	if(!ptr || !wkBase)
+	if(mem_install_hook(hook_func))
 	{
 		printf("- failed to locate webkit memories\n");
 		bsd_close(sck);
