@@ -10,6 +10,7 @@ void *wkBase;
 
 // map area
 void *map_base;
+uint64_t map_size;
 static heap_map_t heap_map[HEAP_MAP_SIZE];
 static int heap_map_cur;
 
@@ -48,9 +49,12 @@ int mem_make_block()
 	memory_info_t minfo;
 	uint32_t pinfo;
 	void *map = map_base;
+	int i;
 
 	heap_map_cur = 0;
+	map_size = 0;
 
+	// scan for areas
 	while(1)
 	{
 		if(svcQueryMemory(&minfo, &pinfo, addr))
@@ -58,20 +62,16 @@ int mem_make_block()
 
 		if(minfo.permission == 3 && minfo.memory_type == 5 && minfo.memory_attribute == 0)
 		{
-			int ret = svcMapMemory(map, minfo.base_addr, minfo.size);
-			if(!ret)
+			heap_map[heap_map_cur].src = minfo.base_addr;
+			heap_map[heap_map_cur].dst = map;
+			heap_map[heap_map_cur].size = minfo.size;
+			map += minfo.size;
+			heap_map_cur++;
+			if(heap_map_cur == HEAP_MAP_SIZE)
 			{
-				heap_map[heap_map_cur].src = minfo.base_addr;
-				heap_map[heap_map_cur].dst = map;
-				heap_map[heap_map_cur].size = minfo.size;
-				map += minfo.size;
-				if(heap_map_cur == HEAP_MAP_SIZE)
-				{
-					printf("- out of map storage space\n");
-					break;
-				}
-			} else
-				printf("- svcMapMemory failed 0x%06X\n", ret);
+				printf("- out of map storage space\n");
+				break;
+			}
 		}
 
 		addr = minfo.base_addr + minfo.size;
@@ -79,8 +79,43 @@ int mem_make_block()
 			break;
 	}
 
-	printf("- mapped %luB contiguous memory block\n", map - map_base);
+	// map those areas
+	for(i = 0; i < heap_map_cur; i++)
+	{
+		result_t r = svcMapMemory(heap_map[i].dst, heap_map[i].src, heap_map[i].size);
+		if(r)
+		{
+			printf("- svcMapMemory error 0x%06X\n", r);
+			heap_map[i].size = 0; // mark as useless
+		}
+	}
 
+	map_size = map - map_base;
+	printf("- mapped %luB contiguous memory block\n", map_size);
+
+	return 0;
+}
+
+// free created contiguous block
+// uses 'heap_map' for unmapping
+int mem_destroy_block()
+{
+	int i;
+
+	map_size = 0;
+
+	for(i = 0; i < heap_map_cur; i++)
+	{
+		if(heap_map[i].size)
+		{
+			result_t r;
+			r = svcUnmapMemory(heap_map[i].dst, heap_map[i].src, heap_map[i].size);
+			if(r)
+				return r;
+		}
+	}
+
+	heap_map_cur = 0;
 	return 0;
 }
 
