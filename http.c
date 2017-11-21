@@ -107,16 +107,14 @@ int http_init(const char *hostname)
 	// get IP
 	ret = bsd_getaddrinfo_fixed(hostname, "6767", &hints, &aif, 1);
 	if(ret)
-	{
-		printf("- failed to getaddrinfo: %d, 0x%x\n", ret, bsd_result);
 		return ret;
-	}
+
 	if(aif.ai.ai_family != AF_INET)
 		return 2;
 	sin = (struct sockaddr_in*)&aif.addr;
 	server_addr.sin_addr.s_addr = sin->sin_addr.s_addr;
 
-	printf("- host '%s' IP is %i.%i.%i.%i\n", hostname, server_addr.sin_addr.s_addr & 0xFF, (server_addr.sin_addr.s_addr >> 8) & 0xFF, (server_addr.sin_addr.s_addr >> 16) & 0xFF, server_addr.sin_addr.s_addr >> 24);
+//	printf("- host '%s' IP is %i.%i.%i.%i\n", hostname, server_addr.sin_addr.s_addr & 0xFF, (server_addr.sin_addr.s_addr >> 8) & 0xFF, (server_addr.sin_addr.s_addr >> 16) & 0xFF, server_addr.sin_addr.s_addr >> 24);
 
 	// copy hostname
 	strncpy(http_host, hostname, sizeof(http_host)-1);
@@ -127,6 +125,11 @@ int http_init(const char *hostname)
 	http_stdout._bf._base = (void*)1;
 
 	return 0;
+}
+
+void http_paste_ip(uint32_t *target)
+{
+	*target = server_addr.sin_addr.s_addr;
 }
 
 int http_get_file(const char *path)
