@@ -6,6 +6,7 @@
 #include "defs.h"
 #include "server.h"
 #include "memory.h"
+#include "nro.h"
 
 static int sockets[2];
 
@@ -87,8 +88,9 @@ void server_loop()
 					printf("- exit loader\n");
 					return;
 				}
-				*(char*)ptr = 0;
-				printf("- got %luB from client:\n%s", ptr - heap_base, heap_base);
+				// load and run NRO
+				size = nro_execute((int)(ptr - heap_base));
+				printf("- NRO returned 0x%016lX\n", size);
 				continue;
 			}
 			// move pinter
