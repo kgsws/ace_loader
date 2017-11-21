@@ -10,7 +10,7 @@
 #include "nro.h"
 
 FILE custom_stdout;
-static int sck;
+int std_sck;
 
 // thread context
 typedef struct
@@ -35,13 +35,10 @@ typedef struct
 	uint64_t unk3;
 } thread_context_t;
 
-static const struct sockaddr_in server_addr =
+static struct sockaddr_in server_addr =
 {
 	.sin_family = AF_INET,
-	.sin_port = htons(2991),
-	.sin_addr = {
-		.s_addr = make_ip(192,168,1,47)
-	}
+	.sin_port = htons(STDOUT_PORT),
 };
 
 uint64_t extra_cleanup(uint64_t arg0);
@@ -112,7 +109,7 @@ long double __extenddftf2(double a)
 
 static int stdout_debug(struct _reent *reent, void *v, const char *ptr, int len)
 {
-	bsd_send(sck, ptr, len, 0);
+	bsd_send(std_sck, ptr, len, 0);
 	return len;
 }
 
@@ -133,7 +130,7 @@ void locate_threads(void *base, uint64_t size, int simple)
 				if(strcmp(tc->name, "MainThread"))
 				{
 					uint64_t *ptr = tc->sp_mirror;
-					uint64_t size = tc->sp_size;
+					uint64_t sizE = tc->sp_size;
 					uint64_t *bend = wkBase + WK_SIZE;
 					switch(simple)
 					{
@@ -153,12 +150,12 @@ void locate_threads(void *base, uint64_t size, int simple)
 							}
 							// exit thread
 							printf("- cleaning up\n");
-							while(size)
+							while(sizE)
 							{
 								if(*ptr >= (uint64_t)wkBase && *ptr < (uint64_t)bend)
 									*ptr = (uint64_t)(wkBase + 0x3ed2d4);
 								ptr++;
-								size -= sizeof(uint64_t);
+								sizE -= sizeof(uint64_t);
 							}
 						break;
 					}
@@ -282,33 +279,49 @@ void hook_func(uint64_t arg0)
 
 	// cleanup the heap
 	if(mem_heap_cleanup())
+	{
+		printf("- failed to cleanup heap area\n");
 		goto crash;
+	}
 
 	// get largest heap block
 	if(mem_get_heap())
-		goto crash;
-
-	// debug
-	printf("- got %luB for NRO\n", heap_size);
-
-	// get NRO
-	ret = http_get_file("autorun.nro");
-	if(ret > 0)
 	{
-		printf("- ldr:ro test\n");
-		nro_load(ret);
+		printf("- failed to locate usefull heap area\n");
+		goto crash;
+	}
+
+	// initialize RO
+	ret = ro_init();
+	if(ret)
+	{
+		printf("- ldr:ro initialization error 0x%06X\n", ret);
+		goto crash;
 	}
 
 	// debug
-//	mem_info();
+	printf("- got %luB heap block at 0x%016lX\n", heap_size, (uint64_t)heap_base);
+
+	// start autorun NRO - if found
+	ret = http_get_file("autorun.nro");
+	if(ret > 0)
+	{
+		uint64_t r;
+		printf("- starting autorun\n");
+		r = nro_execute(ret);
+		printf("- NRO returned 0x%016lX\n", r);
+		// exit now
+		goto crash;
+	}
 
 	// start 'push' server
 	if(!server_init())
 		server_loop();
 
 crash:
-	bsd_close(sck);
+	bsd_close(std_sck);
 	bsd_finalize();
+	ro_finalize();
 	sm_finalize();
 
 	svcSleepThread(1000*1000*1000);
@@ -330,17 +343,31 @@ int main(const char *http_host)
 		return 1;
 	}
 
-	sck = bsd_socket(2, 1, 6); // AF_INET, SOCK_STREAM, PROTO_TCP
-	if(sck < 0)
+	// init HTTP (resolve hostname)
+	if(http_init(http_host))
+	{
+		bsd_close(std_sck);
+		bsd_finalize();
+		sm_finalize();
+		return 1;
+	}
+
+	// get stdout IP
+	http_paste_ip((uint32_t*)&server_addr.sin_addr.s_addr);
+
+	// create stdout socket
+	std_sck = bsd_socket(2, 1, 6); // AF_INET, SOCK_STREAM, PROTO_TCP
+	if(std_sck < 0)
 	{
 		bsd_finalize();
 		sm_finalize();
 		return 1;
 	}
 
-	if(bsd_connect(sck, (struct sockaddr*) &server_addr, sizeof(server_addr)) < 0)
+	// connect to stdout server // TODO: make optional
+	if(bsd_connect(std_sck, (struct sockaddr*) &server_addr, sizeof(server_addr)) < 0)
 	{
-		bsd_close(sck);
+		bsd_close(std_sck);
 		bsd_finalize();
 		sm_finalize();
 		return 1;
@@ -354,22 +381,12 @@ int main(const char *http_host)
 	stdout = &custom_stdout;
 	stderr = &custom_stdout;
 
-	// init HTTP
-	if(http_init(http_host))
-	{
-		printf("- failed to get HTTP address\n");
-		bsd_close(sck);
-		bsd_finalize();
-		sm_finalize();
-		return 1;
-	}
-
 	// locate and hook webkit
 	printf("searching for webkit ...\n");
 	if(mem_install_hook(hook_func))
 	{
 		printf("- failed to locate webkit memories\n");
-		bsd_close(sck);
+		bsd_close(std_sck);
 		bsd_finalize();
 		sm_finalize();
 		return 1;
