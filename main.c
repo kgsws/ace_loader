@@ -96,17 +96,6 @@ const int static_handles[] =
 
 void *test_base;
 
-// dummy for linker fail
-void *__trunctfdf2()
-{
-	return NULL;
-}
-// dummy for linker fail
-long double __extenddftf2(double a)
-{
-	return a;
-}
-
 static int stdout_debug(struct _reent *reent, void *v, const char *ptr, int len)
 {
 	bsd_send(std_sck, ptr, len, 0);
@@ -382,7 +371,6 @@ int main(int argc, char **argv)
 	}
 
 	// this exact sequence will redirect stdout to socket
-	printf("_"); // init stdout
 	custom_stdout._write = stdout_debug;
 	custom_stdout._flags = __SWR | __SNBF;
 	custom_stdout._bf._base = (void*)1;
