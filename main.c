@@ -330,8 +330,16 @@ crash:
 	while(1);
 }
 
-int main(const char *http_host)
+int main(int argc, char **argv)
 {
+	const char *hostname;
+	
+	if(argc == 0) {
+		hostname = "a.b"; // PegaSwitch will respond to any DNS request
+	} else {
+		hostname = argv[0];
+	}
+	
 	ipc_debug_flag = 0;
 
 	if(sm_init() != RESULT_OK)
@@ -344,7 +352,7 @@ int main(const char *http_host)
 	}
 
 	// init HTTP (resolve hostname)
-	if(http_init(http_host))
+	if(http_init(hostname))
 	{
 		bsd_close(std_sck);
 		bsd_finalize();
