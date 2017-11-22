@@ -142,6 +142,9 @@ result_t nro_unload()
 	if(loader_context.return_flags & RETF_RUN_MEMINFO)
 		mem_info();
 
+	// rescan for free heap block now
+	mem_get_heap(); // TODO: panic on fail?
+
 	return r;
 }
 
