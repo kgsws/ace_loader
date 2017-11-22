@@ -308,7 +308,9 @@ void hook_func(uint64_t arg0)
 		server_loop();
 
 crash:
-	bsd_close(std_sck);
+	if(std_sck >= 0)
+		bsd_close(std_sck);
+
 	bsd_finalize();
 	ro_finalize();
 	sm_finalize();
@@ -322,13 +324,12 @@ crash:
 int main(int argc, char **argv)
 {
 	const char *hostname;
-	
-	if(argc == 0) {
+
+	if(argc == 0)
 		hostname = "a.b"; // PegaSwitch will respond to any DNS request
-	} else {
-		hostname = argv[0];
-	}
-	
+	else
+		hostname = argv[0]; // use provided hostname
+
 	ipc_debug_flag = 0;
 
 	if(sm_init() != RESULT_OK)
@@ -352,22 +353,16 @@ int main(int argc, char **argv)
 	// get stdout IP
 	http_paste_ip((uint32_t*)&server_addr.sin_addr.s_addr);
 
-	// create stdout socket
+	// create stdout socket, optional
 	std_sck = bsd_socket(2, 1, 6); // AF_INET, SOCK_STREAM, PROTO_TCP
-	if(std_sck < 0)
+	if(std_sck >= 0)
 	{
-		bsd_finalize();
-		sm_finalize();
-		return 1;
-	}
-
-	// connect to stdout server // TODO: make optional
-	if(bsd_connect(std_sck, (struct sockaddr*) &server_addr, sizeof(server_addr)) < 0)
-	{
-		bsd_close(std_sck);
-		bsd_finalize();
-		sm_finalize();
-		return 1;
+		// connect to stdout server, optional
+		if(bsd_connect(std_sck, (struct sockaddr*) &server_addr, sizeof(server_addr)) < 0)
+		{
+			bsd_close(std_sck);
+			std_sck = -1; // invalidate
+		}
 	}
 
 	// this exact sequence will redirect stdout to socket

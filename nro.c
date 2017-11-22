@@ -50,21 +50,23 @@ uint64_t nro_start()
 	http_paste_ip(&loader_context.workstation_addr);
 	
 	loader_context.return_flags = 0; // out
-	
+
 	// release sm
 	sm_finalize();
 
 	// run NRO
 	ret = entry(&loader_context);
 
-	if(loader_context.log_buffer != NULL && *loader_context.log_length > 0) {
+	// show log buffer if requested
+	if(loader_context.log_buffer != NULL && *loader_context.log_length > 0)
+	{
 		loader_context.log_buffer[*loader_context.log_length] = 0;
-		printf("LOG:\n%s", loader_context.log_buffer);
+		printf("- NRO output LOG:\n%s\n", loader_context.log_buffer);
 	}
-	
+
 	// release memory block
 	mem_destroy_block(); // TODO: panic on fail?
-	
+
 	// get sm again
 	sm_init(); // TODO: panic on fail?
 
