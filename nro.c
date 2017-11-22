@@ -10,12 +10,12 @@
 
 #define NRR_SIZE	0x1000
 
-static nro_loader_ctx_t loader_context;
+static libtransistor_context_t loader_context;
 static void *nro_base;
 
 uint64_t nro_start()
 {
-	uint64_t (*entry)(nro_loader_ctx_t*) = nro_base + 0x80;
+	uint64_t (*entry)(libtransistor_context_t*) = nro_base + 0x80;
 	uint64_t ret;
 
 	// generate memory block
@@ -26,14 +26,18 @@ uint64_t nro_start()
 	}
 
 	// always refill context
-	loader_context.id = LOAER_CTX_ID;
-	loader_context.version = LOADER_VERSION;
+	loader_context.version = LIBTRANSISTOR_CONTEXT_VERSION;
+	loader_context.size = sizeof(loader_context);
+	loader_context.log_buffer = NULL; // out
+	loader_context.log_length = 0; // out
+	loader_context.argv = NULL;
+	loader_context.argc = 0;
 	loader_context.mem_base = map_base;
 	loader_context.mem_size = map_size;
 	loader_context.std_socket = std_sck;
-//	loader_context.ro_handle = ro_object.object_id; // TODO: check if correct and make ro_object accessible
-	loader_context.return_flags = 0;
-
+	//loader_context.ro_handle = ro_object.object_id; // TODO: check if correct and make ro_object accessible
+	loader_context.return_flags = 0; // out
+	
 	// release sm
 	sm_finalize();
 
