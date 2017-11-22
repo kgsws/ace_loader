@@ -7,6 +7,7 @@
 #include "nro.h"
 #include "sha256.h"
 #include "memory.h"
+#include "http.h"
 
 #define NRR_SIZE	0x1000
 
@@ -26,16 +27,28 @@ uint64_t nro_start()
 	}
 
 	// always refill context
+	loader_context.magic = LIBTRANSISTOR_CONTEXT_MAGIC;
 	loader_context.version = LIBTRANSISTOR_CONTEXT_VERSION;
 	loader_context.size = sizeof(loader_context);
+	
 	loader_context.log_buffer = NULL; // out
 	loader_context.log_length = 0; // out
+	
 	loader_context.argv = NULL;
 	loader_context.argc = 0;
+	
 	loader_context.mem_base = map_base;
 	loader_context.mem_size = map_size;
+
+	loader_context.has_bsd = true;
+	loader_context.bsd_object = bsd_get_object();
 	loader_context.std_socket = std_sck;
-	//loader_context.ro_handle = ro_object.object_id; // TODO: check if correct and make ro_object accessible
+
+	loader_context.has_ro = false; // true;
+	//loader_context.ro_handle = ro_object; // TODO: check if correct and make ro_object accessible
+
+	http_paste_ip(&loader_context.workstation_addr);
+	
 	loader_context.return_flags = 0; // out
 	
 	// release sm
