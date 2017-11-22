@@ -333,13 +333,13 @@ crash:
 int main(int argc, char **argv)
 {
 	const char *hostname;
-        
+	
 	if(argc == 0) {
 		hostname = "a.b"; // PegaSwitch will respond to any DNS request
 	} else {
 		hostname = argv[0];
 	}
-        
+	
 	ipc_debug_flag = 0;
 
 	if(sm_init() != RESULT_OK)
