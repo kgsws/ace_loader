@@ -16,6 +16,7 @@ static void *nro_base;
 
 uint64_t nro_start()
 {
+	result_t r;
 	uint64_t (*entry)(libtransistor_context_t*) = nro_base + 0x80;
 	uint64_t ret;
 
@@ -25,18 +26,17 @@ uint64_t nro_start()
 		printf("- failed to map memory block\n");
 		return -1;
 	}
-
 	// always refill context
 	loader_context.magic = LIBTRANSISTOR_CONTEXT_MAGIC;
 	loader_context.version = LIBTRANSISTOR_CONTEXT_VERSION;
 	loader_context.size = sizeof(loader_context);
-	
+
 	loader_context.log_buffer = NULL; // out
 	loader_context.log_length = 0; // out
-	
+
 	loader_context.argv = NULL;
 	loader_context.argc = 0;
-	
+
 	loader_context.mem_base = map_base;
 	loader_context.mem_size = map_size;
 
@@ -48,11 +48,8 @@ uint64_t nro_start()
 	//loader_context.ro_handle = ro_object; // TODO: check if correct and make ro_object accessible
 
 	http_paste_ip(&loader_context.workstation_addr);
-	
-	loader_context.return_flags = 0; // out
 
-	// release sm
-	sm_finalize();
+	loader_context.return_flags = 0; // out
 
 	// run NRO
 	ret = entry(&loader_context);
@@ -65,10 +62,11 @@ uint64_t nro_start()
 	}
 
 	// release memory block
-	mem_destroy_block(); // TODO: panic on fail?
-
-	// get sm again
-	sm_init(); // TODO: panic on fail?
+	if(mem_destroy_block())
+	{
+		printf("- PANIC: failed to unmap memory\n");
+		exit_loader();
+	}
 
 	return ret;
 }
@@ -156,7 +154,11 @@ result_t nro_unload()
 		mem_info();
 
 	// rescan for free heap block now
-	mem_get_heap(); // TODO: panic on fail?
+	if(mem_get_heap())
+	{
+		printf("- PANIC: failed get memory\n");
+		exit_loader();
+	}
 
 	return r;
 }
@@ -172,7 +174,7 @@ uint64_t nro_execute(int in_size)
 
 	ret = nro_start();
 
-	nro_unload(); // TODO: panic on fail?
+	nro_unload(); // unload can fail; for now not a critical error
 
 	return ret;
 }

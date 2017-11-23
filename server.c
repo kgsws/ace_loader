@@ -250,6 +250,7 @@ void func_echo(char *par)
 	if(!par)
 	{
 		printf("empty echo?\n");
+		return;
 	}
 
 	printf("%s\n", par);

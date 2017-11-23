@@ -288,6 +288,9 @@ void hook_func(uint64_t arg0)
 		goto crash;
 	}
 
+	// release sm; it's not needed anymore
+	sm_finalize();
+
 	// debug
 	printf("- got %luB heap block at 0x%016lX\n", heap_size, (uint64_t)heap_base);
 
@@ -308,16 +311,18 @@ void hook_func(uint64_t arg0)
 		server_loop();
 
 crash:
+	exit_loader();
+}
+
+void exit_loader()
+{
 	if(std_sck >= 0)
 		bsd_close(std_sck);
-
 	bsd_finalize();
 	ro_finalize();
-	sm_finalize();
-
 	svcSleepThread(1000*1000*1000);
-	*(uint64_t*)8 = 1; // CRASH
-
+	// CRASH
+	*(uint64_t*)8 = 1;
 	while(1);
 }
 
