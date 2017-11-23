@@ -7,10 +7,60 @@
 #include "server.h"
 #include "memory.h"
 #include "nro.h"
+#include "http.h"
+
+typedef struct
+{
+	void (*func)(char*);
+	char *cmd;
+	char *help;
+} scmd_t;
 
 static int sockets[2];
 extern int std_sck;
 extern struct sockaddr_in stdout_server_addr;
+
+static int sck_bkup;
+
+void func_help(char*);
+void func_echo(char*);
+void func_stdout(char*);
+void func_exec(char*);
+void func_meminfo(char*);
+
+static const scmd_t server_commands[] =
+{
+	{func_help, "help", NULL},
+	{func_echo, "echo", NULL},
+	{NULL, "exit", "exit loader"},
+	{func_stdout, "stdout", "reconnect / disconnect / connect to stdout server"},
+	{func_exec, "exec", "load and run NRO from HTTP server"},
+	{func_meminfo, "meminfo", "print memory map using svcQueryMemory"}
+};
+#define NUM_CMDS (sizeof(server_commands) / sizeof(scmd_t))
+
+static int cmd_compare(const char *t0, const char *t1)
+{
+	int i = 0;
+	while(1)
+	{
+		if(*t1 == ' ')
+		{
+			if(*t0 != 0)
+				return 0;
+			else
+				break;
+		}
+		if(*t0 != *t1)
+			return 0;
+		if(!*t0)
+			break;
+		t0++;
+		t1++;
+		i++;
+	}
+	return i;
+}
 
 int server_init()
 {
@@ -84,30 +134,84 @@ void server_loop()
 				bsd_close(sockets[1]);
 				sockets[1] = -1;
 				printf("- client disconnected\n");
-				// got all the data
-				if(*(uint32_t*)heap_base == 0x74697865) // 'exit'
+				// load and run NRO
+				if(size != heap_size && size != 0xFFFFFFFF)
 				{
-					printf("- exit loader\n");
-					return;
-				} else if (*(uint32_t*)heap_base == 0x6F636572) { // 'reco'
-					if(std_sck >= 0)
-						bsd_close(std_sck);
-					std_sck = bsd_socket(2, 1, 6); // AF_INET, SOCK_STREAM, PROTO_TCP
-					if(std_sck >= 0)
-					{
-						// reconnect to stdout server
-						if(bsd_connect(std_sck, (struct sockaddr*) &stdout_server_addr, sizeof(stdout_server_addr)) < 0)
-						{
-							bsd_close(std_sck);
-							std_sck = -1; // invalidate
-						}
-						printf("- Reconnected to log server");
-					}
-				} else {
-					// load and run NRO
 					size = nro_execute((int)(ptr - heap_base));
 					printf("- NRO returned 0x%016lX\n", size);
 				}
+				continue;
+			}
+			// check for command
+			if(size == heap_size)
+			{
+				if(ret < 0x14 || *(uint32_t*)ptr || *(uint32_t*)(ptr+0x10) != NRO_MAGIC)
+					// it's not NRO, enable command mode
+					size = 0xFFFFFFFF;
+			}
+			if(size == 0xFFFFFFFF)
+			{
+				// in commad mode
+				unsigned int i;
+				uint8_t *tmp = ptr;
+
+				// terminate string
+				tmp[ret] = 0;
+				// terminate at first newline
+				while(*tmp)
+				{
+					if(*tmp == '\n' || *tmp == '\r')
+					{
+						*tmp = 0;
+					}
+					tmp++;
+				}
+				// find command
+				for(i = 0; i < NUM_CMDS; i++)
+				{
+					int len = cmd_compare(server_commands[i].cmd, ptr);
+					if(len)
+					{
+						// found command, execute
+						sck_bkup = std_sck;
+
+						// print info
+						printf("- server command '%s'\n", server_commands[i].cmd);
+
+						// redirect stdout to this client
+						std_sck = sockets[1];
+
+						if(!server_commands[i].func)
+						{
+							// exit
+							printf("- exit loader\n");
+							std_sck = sck_bkup;
+							bsd_close(sockets[0]);
+							bsd_close(sockets[1]);
+							printf("- exit loader\n");
+							return;
+						}
+						if(*(uint8_t*)(ptr+len) == ' ')
+						{
+							server_commands[i].func(ptr + len + 1);
+						} else
+							server_commands[i].func(NULL);
+
+						// restore stdout
+						std_sck = sck_bkup;
+
+						break;
+					}
+				}
+				if(i == NUM_CMDS)
+				{
+					sck_bkup = std_sck;
+					std_sck = sockets[1];
+					printf("- unknown command\n");
+					std_sck = sck_bkup;
+					printf("- unknown command from client\n");
+				}
+				// original NRO loading is disabled now
 				continue;
 			}
 			// move pinter
@@ -124,5 +228,127 @@ void server_loop()
 		}
 	}
 	printf("- server error 0x%06X\n", ret);
+}
+
+//
+// command functions
+
+void func_help(char *par)
+{
+	unsigned int i;
+
+	printf("server interface commands:\n");
+	for(i = 0; i < NUM_CMDS; i++)
+	{
+		if(server_commands[i].help)
+			printf("%s\t%s\n", server_commands[i].cmd, server_commands[i].help);
+	}
+}
+
+void func_echo(char *par)
+{
+	if(!par)
+	{
+		printf("empty echo?\n");
+	}
+
+	printf("%s\n", par);
+	std_sck = sck_bkup;
+	printf("- echo '%s'\n", par);
+	sck_bkup = std_sck;
+	std_sck = sockets[1];
+}
+
+void func_stdout(char *par)
+{
+	if(!par)
+	{
+		printf("specify action; 'disconnect', 'reconnect' or 'connect'\n");
+		return;
+	}
+
+	if(!strcmp(par, "disconnect"))
+	{
+		if(sck_bkup < 0)
+			printf("- already disconnected\n");
+		else
+		{
+			bsd_close(sck_bkup);
+			sck_bkup = -1;
+			printf("- stdout disconnected\n");
+		}
+		return;
+	} else
+	if(!strcmp(par, "reconnect"))
+	{
+		// disconnect first
+		if(sck_bkup >= 0)
+		{
+			bsd_close(sck_bkup);
+			sck_bkup = -1;
+		}
+		// reconnect to last one
+	} else
+	if(!strncmp(par, "connect ", 8))
+	{
+		unsigned int port, ip[4];
+		// get new connection info
+		if(sscanf(par+8, "%i.%i.%i.%i:%i", &ip[0], &ip[1], &ip[2], &ip[3], &port) != 5)
+		{
+			printf("- invalid connection\n");
+			return;
+		}
+		stdout_server_addr.sin_port = htons(port);
+		stdout_server_addr.sin_addr.s_addr = make_ip(ip[0],ip[1],ip[2],ip[3]);
+		// disconnect now
+		if(sck_bkup >= 0)
+		{
+			bsd_close(sck_bkup);
+			sck_bkup = -1;
+		}
+	} else
+	{
+		printf("specify action; 'disconnect', 'reconnect' or 'connect ip:port'\n");
+		return;
+	}
+	// make connection
+	sck_bkup = bsd_socket(2, 1, 6); // AF_INET, SOCK_STREAM, PROTO_TCP
+	if(sck_bkup >= 0)
+	{
+		if(bsd_connect(sck_bkup, (struct sockaddr*) &stdout_server_addr, sizeof(stdout_server_addr)) < 0)
+		{
+			bsd_close(sck_bkup);
+			sck_bkup = -1; // invalidate
+			printf("- stdout connection failed\n");
+		} else
+			printf("- connected to stdout server\n");
+	} else
+		printf("- socket creation failed\n");
+}
+
+void func_exec(char *par)
+{
+	int ret;
+
+	if(!par)
+	{
+		printf("specify server side path\n");
+		return;
+	}
+
+	ret = http_get_file(par);
+	if(ret > 0)
+	{
+		uint64_t r;
+		printf("- starting NRO\n");
+		r = nro_execute(ret);
+		printf("- NRO returned 0x%016lX\n", r);
+	} else
+		printf("- get NRO error %i\n", -ret);
+}
+
+void func_meminfo(char *par)
+{
+	mem_info();
 }
 

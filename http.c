@@ -154,10 +154,10 @@ int http_get_file(const char *path)
 
 	// get an answer
 	ret = parse_header(temp, sizeof(temp), &offs, &got);
-	// TEST
-	printf("- HTTP file size: %iB\n", ret);
+	// load it now
 	if(ret > 0)
 	{
+		printf("- HTTP file size: %iB\n", ret);
 		if(ret > heap_size)
 		{
 			bsd_close(sck);

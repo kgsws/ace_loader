@@ -94,10 +94,10 @@ const int static_handles[] =
 	0x348036
 };
 
-void *test_base;
-
 static int stdout_debug(struct _reent *reent, void *v, const char *ptr, int len)
 {
+	if(std_sck < 0)
+		return len;
 	bsd_send(std_sck, ptr, len, 0);
 	return len;
 }

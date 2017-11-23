@@ -82,7 +82,7 @@ result_t nro_load(int in_size)
 	uint32_t nro_id = *(uint32_t*)(heap_base + 0x10);
 	uint32_t *nrru32 = (uint32_t*)(heap_base + nro_size + bss_size);
 
-	if(in_size < 0x1000 || nro_id != 0x304f524e || nro_size != in_size || nro_size & 0xFFF)
+	if(in_size < 0x1000 || nro_id != NRO_MAGIC || nro_size != in_size || nro_size & 0xFFF)
 	{
 		printf("- NRO is invalid\n");
 		return 1;

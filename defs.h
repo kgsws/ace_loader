@@ -5,3 +5,6 @@
 
 extern FILE custom_stdout;
 extern int std_sck;
+
+void exit_loader();
+
