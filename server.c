@@ -9,6 +9,8 @@
 #include "nro.h"
 
 static int sockets[2];
+extern int std_sck;
+extern struct sockaddr_in stdout_server_addr;
 
 int server_init()
 {
@@ -87,10 +89,25 @@ void server_loop()
 				{
 					printf("- exit loader\n");
 					return;
+				} else if (*(uint32_t*)heap_base == 0x6F636572) { // 'reco'
+					if(std_sck >= 0)
+						bsd_close(std_sck);
+					std_sck = bsd_socket(2, 1, 6); // AF_INET, SOCK_STREAM, PROTO_TCP
+					if(std_sck >= 0)
+					{
+						// reconnect to stdout server
+						if(bsd_connect(std_sck, (struct sockaddr*) &stdout_server_addr, sizeof(stdout_server_addr)) < 0)
+						{
+							bsd_close(std_sck);
+							std_sck = -1; // invalidate
+						}
+						printf("- Reconnected to log server");
+					}
+				} else {
+					// load and run NRO
+					size = nro_execute((int)(ptr - heap_base));
+					printf("- NRO returned 0x%016lX\n", size);
 				}
-				// load and run NRO
-				size = nro_execute((int)(ptr - heap_base));
-				printf("- NRO returned 0x%016lX\n", size);
 				continue;
 			}
 			// move pinter
