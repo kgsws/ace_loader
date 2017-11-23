@@ -35,7 +35,7 @@ typedef struct
 	uint64_t unk3;
 } thread_context_t;
 
-static struct sockaddr_in server_addr =
+struct sockaddr_in stdout_server_addr =
 {
 	.sin_family = AF_INET,
 	.sin_port = htons(STDOUT_PORT),
@@ -351,14 +351,14 @@ int main(int argc, char **argv)
 	}
 
 	// get stdout IP
-	http_paste_ip((uint32_t*)&server_addr.sin_addr.s_addr);
+	http_paste_ip((uint32_t*)&stdout_server_addr.sin_addr.s_addr);
 
 	// create stdout socket, optional
 	std_sck = bsd_socket(2, 1, 6); // AF_INET, SOCK_STREAM, PROTO_TCP
 	if(std_sck >= 0)
 	{
 		// connect to stdout server, optional
-		if(bsd_connect(std_sck, (struct sockaddr*) &server_addr, sizeof(server_addr)) < 0)
+		if(bsd_connect(std_sck, (struct sockaddr*) &stdout_server_addr, sizeof(stdout_server_addr)) < 0)
 		{
 			bsd_close(std_sck);
 			std_sck = -1; // invalidate
