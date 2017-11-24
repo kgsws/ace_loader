@@ -227,6 +227,9 @@ void server_loop()
 				}
 				// restore pointer - might be changed
 				ptr = heap_base;
+				// let client know command has finished
+				if(is_silent)
+					bsd_send(sockets[1], "- done\n", 7, 0);
 				// original NRO loading is disabled now
 				continue;
 			}
