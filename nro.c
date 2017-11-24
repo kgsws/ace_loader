@@ -13,10 +13,15 @@
 
 static libtransistor_context_t loader_context;
 static void *nro_base;
+static void *nro_load_base;
+static char **nro_argv;
+
+static char nro_args[NRO_MAX_ARG_BUF];
+static int nro_argc;
+static char *nro_argoffs;
 
 uint64_t nro_start()
 {
-	result_t r;
 	uint64_t (*entry)(libtransistor_context_t*) = nro_base + 0x80;
 	uint64_t ret;
 
@@ -34,8 +39,8 @@ uint64_t nro_start()
 	loader_context.log_buffer = NULL; // out
 	loader_context.log_length = 0; // out
 
-	loader_context.argv = NULL;
-	loader_context.argc = 0;
+	loader_context.argv = nro_argv;
+	loader_context.argc = nro_argc;
 
 	loader_context.mem_base = map_base;
 	loader_context.mem_size = map_size;
@@ -58,7 +63,7 @@ uint64_t nro_start()
 	if(loader_context.log_buffer != NULL && *loader_context.log_length > 0)
 	{
 		loader_context.log_buffer[*loader_context.log_length] = 0;
-		printf("- NRO output LOG:\n%s\n", loader_context.log_buffer);
+		printf("- NRO output LOG (%lub):\n%s\n", *loader_context.log_length, loader_context.log_buffer);
 	}
 
 	// release memory block
@@ -71,14 +76,15 @@ uint64_t nro_start()
 	return ret;
 }
 
-result_t nro_load(int in_size)
+result_t nro_load(void *load_base, int in_size)
 {
 	result_t r;
 	SHA256_CTX ctx;
-	int nro_size = *(uint32_t*)(heap_base + 0x18);
-	uint32_t bss_size = *(uint32_t*)(heap_base + 0x38);
-	uint32_t nro_id = *(uint32_t*)(heap_base + 0x10);
-	uint32_t *nrru32 = (uint32_t*)(heap_base + nro_size + bss_size);
+	uint64_t free_size = heap_size - (load_base - heap_base);
+	int nro_size = *(uint32_t*)(load_base + 0x18);
+	uint32_t bss_size = *(uint32_t*)(load_base + 0x38);
+	uint32_t nro_id = *(uint32_t*)(load_base + 0x10);
+	uint32_t *nrru32 = (uint32_t*)(load_base + nro_size + bss_size);
 
 	if(in_size < 0x1000 || nro_id != NRO_MAGIC || nro_size != in_size || nro_size & 0xFFF)
 	{
@@ -86,7 +92,7 @@ result_t nro_load(int in_size)
 		return 1;
 	}
 
-	if(nro_size + bss_size + NRR_SIZE > heap_size)
+	if(nro_size + bss_size + NRR_SIZE > free_size)
 	{
 		printf("- NRO (+bss) is too big\n");
 		return 2;
@@ -102,7 +108,7 @@ result_t nro_load(int in_size)
 
 	// get hash
 	sha256_init(&ctx);
-	sha256_update(&ctx, (uint8_t*)heap_base, nro_size);
+	sha256_update(&ctx, (uint8_t*)load_base, nro_size);
 	sha256_final(&ctx, (uint8_t*)&nrru32[0xD4]); // hash
 
 	// load NRR
@@ -113,14 +119,18 @@ result_t nro_load(int in_size)
 		return r;
 	}
 
+	// clear bss
+	memset(load_base + nro_size, 0, bss_size);
+
 	// load NRO
-	r = ro_load_nro(&nro_base, heap_base, nro_size, heap_base + nro_size, bss_size);
+	r = ro_load_nro(&nro_base, load_base, nro_size, load_base + nro_size, bss_size);
 	if(r)
 	{
 		printf("- NRO load error 0x%06X\n", r);
 		return r;
 	}
 
+	nro_load_base = load_base;
 	printf("- NRO base at 0x%016lX\n", (uint64_t)nro_base);
 
 	// unload NRR
@@ -144,7 +154,7 @@ result_t nro_unload()
 	else
 	{
 		// unload NRO
-		r = ro_unload_nro(nro_base, heap_base);
+		r = ro_unload_nro(nro_base, nro_load_base);
 		if(r)
 			printf("- NRO unload error 0x%06X\n", r);
 	}
@@ -163,12 +173,12 @@ result_t nro_unload()
 	return r;
 }
 
-uint64_t nro_execute(int in_size)
+uint64_t nro_execute(void *load_base, int in_size)
 {
 	uint64_t ret;
 	result_t r;
 
-	r = nro_load(in_size);
+	r = nro_load(load_base, in_size);
 	if(r)
 		return r;
 
@@ -177,5 +187,29 @@ uint64_t nro_execute(int in_size)
 	nro_unload(); // unload can fail; for now not a critical error
 
 	return ret;
+}
+
+void nro_arg_name(const char *text)
+{
+	// reset arg pointers
+	nro_argc = 0;
+	nro_argv = (char**)nro_args;
+	nro_argoffs = nro_args + sizeof(char*) * NRO_MAX_ARGS;
+	// add argv[0]
+	nro_add_arg(text);
+}
+
+void nro_add_arg(const char *text)
+{
+	if(nro_argc == NRO_MAX_ARGS)
+		return;
+	// copy text
+	strcpy(nro_argoffs, text);
+	// mark offset
+	((char**)nro_args)[nro_argc] = nro_argoffs;
+	// move pointer
+	nro_argoffs += strlen(text)+1;
+	// advance argc
+	nro_argc++;
 }
 

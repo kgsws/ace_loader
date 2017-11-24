@@ -295,12 +295,13 @@ void hook_func(uint64_t arg0)
 	printf("- got %luB heap block at 0x%016lX\n", heap_size, (uint64_t)heap_base);
 
 	// start autorun NRO - if found
-	ret = http_get_file("autorun.nro");
+	ret = http_get_file("autorun.nro", heap_base, heap_size);
 	if(ret > 0)
 	{
 		uint64_t r;
 		printf("- starting autorun\n");
-		r = nro_execute(ret);
+		nro_arg_name("autorun");
+		r = nro_execute(heap_base, ret);
 		printf("- NRO returned 0x%016lX\n", r);
 		// exit now
 		goto crash;
@@ -320,6 +321,7 @@ void exit_loader()
 		bsd_close(std_sck);
 	bsd_finalize();
 	ro_finalize();
+
 	svcSleepThread(1000*1000*1000);
 	// CRASH
 	*(uint64_t*)8 = 1;

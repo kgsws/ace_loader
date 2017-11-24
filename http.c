@@ -132,7 +132,7 @@ void http_paste_ip(uint32_t *target)
 	*target = server_addr.sin_addr.s_addr;
 }
 
-int http_get_file(const char *path)
+int http_get_file(const char *path, void *buff, uint64_t maxsize)
 {
 	char temp[1024];
 	int ret, offs, got;
@@ -158,13 +158,13 @@ int http_get_file(const char *path)
 	if(ret > 0)
 	{
 		printf("- HTTP file size: %iB\n", ret);
-		if(ret > heap_size)
+		if(ret > maxsize)
 		{
 			bsd_close(sck);
 			printf("- file is too big\n");
 			return -3;
 		}
-		ptr = heap_base;
+		ptr = buff;
 		size = ret;
 		if(got)
 		{

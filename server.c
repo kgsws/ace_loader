@@ -21,6 +21,7 @@ extern int std_sck;
 extern struct sockaddr_in stdout_server_addr;
 
 static int sck_bkup;
+static int is_silent;
 
 void func_help(char*);
 void func_echo(char*);
@@ -137,7 +138,8 @@ void server_loop()
 				// load and run NRO
 				if(size != heap_size && size != 0xFFFFFFFF)
 				{
-					size = nro_execute((int)(ptr - heap_base));
+					nro_arg_name("NRO");
+					size = nro_execute(heap_base, (int)(ptr - heap_base));
 					printf("- NRO returned 0x%016lX\n", size);
 				}
 				continue;
@@ -155,6 +157,13 @@ void server_loop()
 				unsigned int i;
 				uint8_t *tmp = ptr;
 
+				// check for 'silent' commands
+				if(tmp[0] == '!')
+				{
+					ptr++;
+					is_silent = 1;
+				} else
+					is_silent = 0;
 				// terminate string
 				tmp[ret] = 0;
 				// terminate at first newline
@@ -179,12 +188,14 @@ void server_loop()
 						printf("- server command '%s'\n", server_commands[i].cmd);
 
 						// redirect stdout to this client
-						std_sck = sockets[1];
+						if(!is_silent)
+							std_sck = sockets[1];
 
 						if(!server_commands[i].func)
 						{
 							// exit
-							printf("- exit loader\n");
+							if(!is_silent)
+								printf("- exit loader\n");
 							std_sck = sck_bkup;
 							bsd_close(sockets[0]);
 							bsd_close(sockets[1]);
@@ -205,12 +216,17 @@ void server_loop()
 				}
 				if(i == NUM_CMDS)
 				{
-					sck_bkup = std_sck;
-					std_sck = sockets[1];
-					printf("- unknown command\n");
-					std_sck = sck_bkup;
+					if(!is_silent)
+					{
+						sck_bkup = std_sck;
+						std_sck = sockets[1];
+						printf("- unknown command\n");
+						std_sck = sck_bkup;
+					}
 					printf("- unknown command from client\n");
 				}
+				// restore pointer - might be changed
+				ptr = heap_base;
 				// original NRO loading is disabled now
 				continue;
 			}
@@ -330,6 +346,8 @@ void func_stdout(char *par)
 void func_exec(char *par)
 {
 	int ret;
+	char *arg = par;
+	char *name = par;
 
 	if(!par)
 	{
@@ -337,12 +355,47 @@ void func_exec(char *par)
 		return;
 	}
 
-	ret = http_get_file(par);
+	// parse name
+	while(*par && *par != ' ')
+		par++;
+	if(*par)
+	{
+		*par = 0;
+		par++;
+		nro_arg_name(arg);
+		// parse args
+		while(*par)
+		{
+			// skip spaces
+			while(*par && *par == ' ')
+				par++;
+			if(!*par)
+				break;
+			arg = par;
+			// search for terminator
+			while(*par && *par != ' ')
+				par++;
+			if(!*par)
+			{
+				// add arg and finish
+				nro_add_arg(arg);
+				break;
+			}
+			// add arg and go next
+			*par = 0;
+			par++;
+			nro_add_arg(arg);
+		}
+	} else
+		nro_arg_name(arg);
+
+	// load & run
+	ret = http_get_file(name, heap_base, heap_size);
 	if(ret > 0)
 	{
 		uint64_t r;
 		printf("- starting NRO\n");
-		r = nro_execute(ret);
+		r = nro_execute(heap_base, ret);
 		printf("- NRO returned 0x%016lX\n", r);
 	} else
 		printf("- get NRO error %i\n", -ret);
