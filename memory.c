@@ -63,9 +63,7 @@ int mem_make_block()
 		if(minfo.permission == 3 && minfo.memory_type == 5 && minfo.memory_attribute == 0)
 		{
 			heap_map[heap_map_cur].src = minfo.base_addr;
-			heap_map[heap_map_cur].dst = map;
 			heap_map[heap_map_cur].size = minfo.size;
-			map += minfo.size;
 			heap_map_cur++;
 			if(heap_map_cur == HEAP_MAP_SIZE)
 			{
@@ -82,11 +80,19 @@ int mem_make_block()
 	// map those areas
 	for(i = 0; i < heap_map_cur; i++)
 	{
-		result_t r = svcMapMemory(heap_map[i].dst, heap_map[i].src, heap_map[i].size);
+		result_t r;
+
+		heap_map[i].dst = map;
+		r = svcMapMemory(heap_map[i].dst, heap_map[i].src, heap_map[i].size);
 		if(r)
 		{
+			// failed
 			printf("- svcMapMemory error 0x%06X\n", r);
 			heap_map[i].size = 0; // mark as useless
+		} else
+		{
+			// OK; advance destination
+			map += heap_map[i].size;
 		}
 	}
 
