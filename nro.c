@@ -14,8 +14,8 @@
 static libtransistor_context_t loader_context;
 static void *nro_base;
 static void *nro_load_base;
-static char **nro_argv;
 
+static char *nro_argv[NRO_MAX_ARGS+1];
 static char nro_args[NRO_MAX_ARG_BUF];
 static int nro_argc;
 static char *nro_argoffs;
@@ -39,7 +39,10 @@ uint64_t nro_start()
 	loader_context.log_buffer = NULL; // out
 	loader_context.log_length = 0; // out
 
-	loader_context.argv = nro_argv;
+	if(nro_argc)
+		loader_context.argv = nro_argv;
+	else
+		loader_context.argv = NULL;
 	loader_context.argc = nro_argc;
 
 	loader_context.mem_base = map_base;
@@ -193,8 +196,7 @@ void nro_arg_name(const char *text)
 {
 	// reset arg pointers
 	nro_argc = 0;
-	nro_argv = (char**)nro_args;
-	nro_argoffs = nro_args + sizeof(char*) * NRO_MAX_ARGS;
+	nro_argoffs = nro_args;
 	// add argv[0]
 	nro_add_arg(text);
 }
@@ -206,10 +208,12 @@ void nro_add_arg(const char *text)
 	// copy text
 	strcpy(nro_argoffs, text);
 	// mark offset
-	((char**)nro_args)[nro_argc] = nro_argoffs;
+	nro_argv[nro_argc] = nro_argoffs;
 	// move pointer
 	nro_argoffs += strlen(text)+1;
 	// advance argc
 	nro_argc++;
+	// NULL next one
+	nro_argv[nro_argc] = NULL;
 }
 
