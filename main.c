@@ -303,8 +303,9 @@ void hook_func(uint64_t arg0)
 		nro_arg_name("autorun");
 		r = nro_execute(heap_base, ret);
 		printf("- NRO returned 0x%016lX\n", r);
-		// exit now
-		goto crash;
+		// do not exit for GUIs
+		if(!nro_loaded_count || nro_unload_fail)
+			goto crash;
 	}
 
 	// start 'push' server

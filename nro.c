@@ -11,6 +11,10 @@
 
 #define NRR_SIZE	0x1000
 
+int nro_load_count;
+int nro_unload_fail;
+int nro_loaded_count;
+
 static libtransistor_context_t loader_context;
 static void *nro_base;
 static void *nro_load_base;
@@ -133,6 +137,8 @@ result_t nro_load(void *load_base, int in_size)
 		return r;
 	}
 
+	nro_load_count++;
+	nro_loaded_count++;
 	nro_load_base = load_base;
 	printf("- NRO base at 0x%016lX\n", (uint64_t)nro_base);
 
@@ -159,7 +165,11 @@ result_t nro_unload()
 		// unload NRO
 		r = ro_unload_nro(nro_base, nro_load_base);
 		if(r)
+		{
+			nro_unload_fail++;
 			printf("- NRO unload error 0x%06X\n", r);
+		} else
+			nro_loaded_count--;
 	}
 
 	// show memory if requested

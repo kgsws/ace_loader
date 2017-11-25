@@ -28,6 +28,7 @@ void func_echo(char*);
 void func_stdout(char*);
 void func_exec(char*);
 void func_meminfo(char*);
+void func_stats(char*);
 
 static const scmd_t server_commands[] =
 {
@@ -36,7 +37,8 @@ static const scmd_t server_commands[] =
 	{NULL, "exit", "exit loader"},
 	{func_stdout, "stdout", "reconnect / disconnect / connect to stdout server"},
 	{func_exec, "exec", "load and run NRO from HTTP server"},
-	{func_meminfo, "meminfo", "print memory map using svcQueryMemory"}
+	{func_meminfo, "meminfo", "print memory map using svcQueryMemory"},
+	{func_stats, "stats", "print statistics"}
 };
 #define NUM_CMDS (sizeof(server_commands) / sizeof(scmd_t))
 
@@ -407,5 +409,10 @@ void func_exec(char *par)
 void func_meminfo(char *par)
 {
 	mem_info();
+}
+
+void func_stats(char *par)
+{
+	printf("ACE Loader stats:\n total NRO loads: %i\n currently loaded NROs: %i\n NRO unload errors: %i\n", nro_load_count, nro_loaded_count, nro_unload_fail);
 }
 

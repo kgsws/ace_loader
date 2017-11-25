@@ -4,6 +4,10 @@
 
 #define NRO_MAGIC	0x304f524e
 
+int nro_load_count;
+int nro_unload_fail;
+int nro_loaded_count;
+
 result_t nro_load(void *load_base, int in_size);
 uint64_t nro_start();
 
