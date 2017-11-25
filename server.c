@@ -1,6 +1,5 @@
 #include <libtransistor/nx.h>
 #include <libtransistor/ipc.h>
-#include <libtransistor/ipc/nifm.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -101,21 +100,8 @@ void server_loop()
 	uint32_t idx;
 	void *ptr = NULL;
 	uint64_t size = 0;
-	u32 ip;
-	result_t r;
 
 	printf("- starting push server ...\n");
-	r = nifm_init();
-	if (r) {
-		printf("- Failed to get IP: nifm_init returned %x\n", r);
-	} else {
-		r = nifm_get_ip_address(&ip);
-		if (r)
-			printf("- Failed to get IP: nifm_get_ip_address returned %x\n", r);
-		else
-			printf("- IP is %u.%u.%u.%u\n", ip & 0xFF, (ip >> 8) & 0xFF, (ip >> 16) & 0xFF, (ip >> 24) & 0xFF);
-		nifm_finalize();
-	}
 	while(1)
 	{
 		if(sockets[1] == -1)
