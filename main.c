@@ -301,6 +301,7 @@ void hook_func(uint64_t arg0)
 		uint64_t r;
 		printf("- starting autorun\n");
 		nro_arg_name("autorun");
+		nro_add_arg(http_hostname);
 		r = nro_execute(heap_base, ret);
 		printf("- NRO returned 0x%016lX\n", r);
 		// do not exit for GUIs

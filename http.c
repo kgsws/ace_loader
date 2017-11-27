@@ -11,7 +11,7 @@ static FILE http_stdout;
 static int sck; // HTTP socket
 
 static const char http_get_template[] = "GET /files/%s HTTP/1.1\r\nHost: %s\r\nUser-Agent: ACE loader\r\nAccept-Encoding: none\r\nConnection: close\r\n\r\n";
-static char http_host[128];
+char http_hostname[128];
 
 static struct sockaddr_in server_addr =
 {
@@ -117,7 +117,7 @@ int http_init(const char *hostname)
 //	printf("- host '%s' IP is %i.%i.%i.%i\n", hostname, server_addr.sin_addr.s_addr & 0xFF, (server_addr.sin_addr.s_addr >> 8) & 0xFF, (server_addr.sin_addr.s_addr >> 16) & 0xFF, server_addr.sin_addr.s_addr >> 24);
 
 	// copy hostname
-	strncpy(http_host, hostname, sizeof(http_host)-1);
+	strncpy(http_hostname, hostname, sizeof(http_hostname)-1);
 
 	// prepare HTTP stdout
 	http_stdout._write = stdout_http;
@@ -150,7 +150,7 @@ int http_get_file(const char *path, void *buff, uint64_t maxsize)
 	}
 
 	// make a request
-	fprintf(&http_stdout, http_get_template, path, http_host);
+	fprintf(&http_stdout, http_get_template, path, http_hostname);
 
 	// get an answer
 	ret = parse_header(temp, sizeof(temp), &offs, &got);
