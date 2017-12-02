@@ -63,8 +63,16 @@ uint64_t nro_start()
 
 	loader_context.return_flags = 0; // out
 
+	// Backup and clean main thread TLS pointer
+	void **tls_userspace_pointer = (void**)(get_tls() + 0x1F8);
+	void *tls_backup = *tls_userspace_pointer;
+	*(void**)(get_tls() + 0x1f8) = NULL;
+
 	// run NRO
 	ret = entry(&loader_context);
+
+	// Restore TLS
+	*tls_userspace_pointer = tls_backup;
 
 	// show log buffer if requested
 	if(loader_context.log_buffer != NULL && *loader_context.log_length > 0)
