@@ -1,10 +1,5 @@
 -= ACE loader =-
 
-- get and compile libtransistor
-- create your own project directory (any name will do)
-- clone this into your project directory
-
-path to this should be something like 'libtransistor/projects/ace_loader'
-
-SHA256 implementation used from:
-https://github.com/B-Con/crypto-algorithms
+** NOTE **
+ace_loader has been added directly into libtransistor now
+https://github.com/reswitched/libtransistor
